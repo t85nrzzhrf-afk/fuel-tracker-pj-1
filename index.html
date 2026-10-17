@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fuel Range</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<style>
+:root{--bg:#e9eef2;--card:#fff;--ink:#14212b;--mute:#5b6b78;--line:#cfd8df;--ok:#0e7c5a;--warn:#c58a00;--bad:#c8372d;--acc:#0e5a7c;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1a22;--card:#17262f;--ink:#e8eef2;--mute:#92a3b0;--line:#2a3d49;--ok:#3fc79a;--warn:#e8b53a;--bad:#ff6b5e;--acc:#5ab4dc;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0f1a22;--card:#17262f;--ink:#e8eef2;--mute:#92a3b0;--line:#2a3d49;--ok:#3fc79a;--warn:#e8b53a;--bad:#ff6b5e;--acc:#5ab4dc;color-scheme:dark}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;max-width:480px;margin:0 auto;padding:16px 16px 40px}
+h1{font-size:22px;margin:4px 0 2px}
+.sub{color:var(--mute);font-size:14px;margin:0 0 14px}
+nav{display:flex;gap:6px;margin-bottom:14px}
+nav button{font-size:14px;flex:1;padding:10px 4px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;font:inherit;font-weight:600;cursor:pointer}
+nav button[aria-selected="true"]{background:var(--acc);color:#fff;border-color:var(--acc)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+.card h2{font-size:16px;margin:0 0 10px}
+label{display:block;font-size:13px;color:var(--mute);margin:10px 0 4px}
+input,select,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink);font:inherit}
+input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.row{display:flex;gap:10px}.row>div{flex:1}
+.btn{padding:11px 14px;border:0;border-radius:10px;background:var(--acc);color:#fff;font:inherit;font-weight:600;cursor:pointer;width:100%;margin-top:12px}
+.btn.alt{background:transparent;color:var(--acc);border:1px solid var(--acc)}
+.big{font-size:34px;font-weight:700;line-height:1.1}
+.mute{color:var(--mute);font-size:14px}
+.gauge{display:block;margin:0 auto;width:100%;max-width:300px}
+.status{border-radius:12px;padding:12px;font-weight:600;margin-top:10px}
+.s-ok{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok)}
+.s-warn{background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn)}
+.s-bad{background:color-mix(in srgb,var(--bad) 16%,transparent);color:var(--bad)}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{padding:6px 4px;border-bottom:1px solid var(--line);text-align:left}
+.wrap{overflow-x:auto}
+.hide{display:none}
+</style>
+</head>
+<body>
+<h1>Fuel Range</h1>
+<p class="sub">Know how much fuel a trip needs and when to refuel.</p>
+
+<nav role="tablist">
+<button role="tab" data-t="setup" aria-selected="true">Vehicle</button>
+<button role="tab" data-t="trip" aria-selected="false">Trip</button>
+<button role="tab" data-t="tank" aria-selected="false">Tank</button>
+<button role="tab" data-t="mapt" aria-selected="false">Map</button>
+<button role="tab" data-t="log" aria-selected="false">Refuels</button>
+</nav>
+
+<section id="setup">
+<div class="card">
+<h2>Your vehicle</h2>
+<label for="veh">Model</label><select id="veh"></select>
+<div class="row">
+<div><label for="age">Age (years)</label><input id="age" type="number" min="0" max="40" step="1"></div>
+<div><label for="cap">Tank size (litres)</label><input id="cap" type="number" min="1" step="0.1"></div>
+</div>
+<label for="mil">Your real mileage, km/l (optional)</label>
+<input id="mil" type="number" min="1" step="0.1" placeholder="Leave empty to use the estimate">
+<label for="price">Fuel price (₹ per litre)</label><input id="price" type="number" min="1" step="0.1">
+<p class="mute" id="effline" style="margin-top:12px"></p>
+</div>
+<div class="card"><h2>How the estimate works</h2>
+<p class="mute" style="margin:0">Starts from the maker’s claimed mileage, takes off 20% for real roads, then 1.5% for each year of age. Log your refuels and the app replaces this guess with your vehicle’s real mileage. Model figures are approximate.</p></div>
+</section>
+
+<section id="trip" class="hide">
+<div class="card">
+<h2>Trip fuel estimate</h2>
+<label for="dist">Distance A to B (km)</label><input id="dist" type="number" min="0" step="0.1" placeholder="e.g. 120">
+<label for="road">Road type</label>
+<select id="road"><option value="0.85">City traffic</option><option value="1" selected>Mixed</option><option value="1.05">Steady highway</option></select>
+<div id="tripout" class="hide">
+<p class="big" id="tl">–</p><p class="mute" id="tsub"></p>
+<div class="status" id="tstat"></div>
+</div>
+</div>
+</section>
+
+<section id="tank" class="hide">
+<div class="card">
+<svg class="gauge" viewBox="0 0 300 170" role="img" aria-label="Range gauge">
+<path d="M30 150 A120 120 0 0 1 270 150" fill="none" stroke="var(--line)" stroke-width="22" stroke-linecap="round"/>
+<path id="arc" d="M30 150 A120 120 0 0 1 270 150" fill="none" stroke="var(--ok)" stroke-width="22" stroke-linecap="round" pathLength="100" stroke-dasharray="0 100"/>
+<text id="gl" x="150" y="128" text-anchor="middle" font-size="40" font-weight="700" fill="var(--ink)">–</text>
+<text x="150" y="152" text-anchor="middle" font-size="14" fill="var(--mute)">km of range left</text>
+</svg>
+<p class="mute" id="gt" style="text-align:center;margin:6px 0 0"></p>
+</div>
+<div class="card">
+<h2>Right now</h2>
+<label for="lvl">Fuel in tank: <b id="lvlv"></b></label><input id="lvl" type="range" min="0" max="100" step="1">
+<div class="row">
+<div><label for="spd">Speed (km/h)</label><input id="spd" type="number" min="5" max="160" step="1"></div>
+<div><label for="np">Next pump in (km)</label><input id="np" type="number" min="0" step="0.5" placeholder="e.g. 35"></div>
+</div>
+<button class="btn alt" id="gps">Use live GPS speed</button>
+<p class="mute" id="gpsmsg" style="margin:6px 0 0"></p>
+<div class="status" id="pstat"></div>
+</div>
+</section>
+
+<section id="mapt" class="hide"><div class="card"><h2>Route and pumps</h2>
+<div id="m" style="height:300px;border-radius:10px;z-index:0"></div>
+<button class="btn" id="mgps">Start live GPS</button>
+<label for="dest">Destination</label><input id="dest" placeholder="e.g. Chandigarh bus stand">
+<button class="btn alt" id="mgo">Find route and pumps</button>
+<p class="mute" id="mmsg"></p>
+<div class="status s-ok" id="mstat">Start GPS, then pick a destination.</div></div></section>
+
+<section id="log" class="hide">
+<div class="card">
+<h2>Add a refuel</h2>
+<p class="mute" style="margin:0">Fill the tank to full each time, then enter litres and odometer.</p>
+<div class="row">
+<div><label for="lt">Litres filled</label><input id="lt" type="number" min="0.1" step="0.01"></div>
+<div><label for="odo">Odometer (km)</label><input id="odo" type="number" min="0" step="1"></div>
+</div>
+<button class="btn" id="addlog">Save refuel</button>
+<p class="mute" id="logmsg" style="margin:6px 0 0"></p>
+</div>
+<div class="card">
+<h2>Your real mileage</h2>
+<p class="big" id="avg">–</p><p class="mute" id="avgsub">Needs at least two refuels.</p>
+<button class="btn alt hide" id="useavg">Use this as my mileage</button>
+<div class="wrap" style="margin-top:10px"><table id="tbl"></table></div>
+<button class="btn alt" id="undo">Delete last refuel</button>
+</div>
+<div class="card">
+<h2>Test data</h2>
+<p class="mute" style="margin:0">Export your numbers to compare the estimate with what really happened.</p>
+<button class="btn alt" id="exp">Show data</button>
+<textarea id="out" rows="6" class="hide" style="margin-top:10px" readonly></textarea>
+<button class="btn alt" id="reset" style="color:var(--bad);border-color:var(--bad)">Clear all saved data</button>
+</div>
+</section>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+var V=[["Honda Activa 6G",50,5.3],["TVS Jupiter",50,5.1],["Suzuki Access 125",52,5],["Hero Splendor Plus",70,9.8],["Honda Shine 125",55,10.5],["Bajaj Pulsar 150",50,15],["TVS Apache RTR 160",45,12],["Royal Enfield Classic 350",35,13],["Maruti Alto",22,35],["Maruti Swift",22,37],["Hyundai i20",20,37],["Hyundai Creta (petrol)",16,50],["Tata Nexon (petrol)",17,44],["Light truck (Tata Ace type)",20,30],["Heavy truck",4,300],["Other (enter your mileage)",40,10]];
+var S={v:0,age:3,cap:5.3,mil:"",price:100,lvl:50,spd:40,logs:[]};
+try{var raw=localStorage.getItem("fuelapp1");if(raw){S=Object.assign(S,JSON.parse(raw))}}catch(e){}
+function save(){try{localStorage.setItem("fuelapp1",JSON.stringify(S))}catch(e){}}
+var $=function(i){return document.getElementById(i)};
+function eff(){var m=parseFloat(S.mil);if(m>0)return m;var c=V[S.v][1];return c*0.8*Math.max(0.6,1-0.015*(S.age||0))}
+function sf(s){return s<20?0.8:s<=60?1:s<=80?0.9:s<=100?0.8:0.7}
+function f1(n){return (Math.round(n*10)/10).toString()}
+function hm(h){var m=Math.round(h*60);return Math.floor(m/60)+" h "+(m%60)+" min"}
+
+V.forEach(function(v,i){var o=document.createElement("option");o.value=i;o.textContent=v[0];$("veh").appendChild(o)});
+function fill(){$("veh").value=S.v;$("age").value=S.age;$("cap").value=S.cap;$("mil").value=S.mil;$("price").value=S.price;$("lvl").value=S.lvl;$("spd").value=S.spd}
+$("veh").onchange=function(){S.v=+this.value;S.cap=V[S.v][2];$("cap").value=S.cap;S.mil="";$("mil").value="";upd()};
+["age","cap","mil","price","spd"].forEach(function(k){$(k).oninput=function(){S[k]=this.value===""?"":+this.value;upd()}});
+$("lvl").oninput=function(){S.lvl=+this.value;upd()};
+$("dist").oninput=upd;$("road").onchange=upd;$("np").oninput=upd;
+
+function upd(){
+ var e=eff();
+ $("effline").textContent="Estimated mileage: "+f1(e)+" km/l"+(parseFloat(S.mil)>0?" (your own figure)":"");
+ // trip
+ var d=parseFloat($("dist").value);
+ if(d>0){
+  var f=parseFloat($("road").value),L=d/(e*f),Lr=L*1.1,have=S.cap*S.lvl/100;
+  $("tripout").classList.remove("hide");
+  $("tl").textContent=f1(L)+" litres";
+  $("tsub").textContent="About ₹"+Math.round(L*S.price)+". Carry "+f1(Lr)+" L to keep a 10% reserve.";
+  var st=$("tstat");
+  if(have>=Lr){st.className="status s-ok";st.textContent="Your current fuel ("+f1(have)+" L) is enough for this trip."}
+  else if(have>=L){st.className="status s-warn";st.textContent="Just enough ("+f1(have)+" L), but with no reserve. Refuel on the way."}
+  else{st.className="status s-bad";st.textContent="You need about "+f1(L-have)+" L more. Refuel before you leave or on the way."}
+ }else $("tripout").classList.add("hide");
+ // tank
+ var litres=S.cap*S.lvl/100,spd=Math.max(5,S.spd||40),range=litres*e*sf(spd);
+ $("lvlv").textContent=Math.round(S.lvl)+"% ("+f1(litres)+" L)";
+ var full=S.cap*e,pct=Math.min(100,range/full*100);
+ $("arc").setAttribute("stroke-dasharray",pct+" 100");
+ $("arc").setAttribute("stroke",range<30?"var(--bad)":range<60?"var(--warn)":"var(--ok)");
+ $("gl").textContent=Math.round(range);
+ $("gt").textContent="About "+hm(range/spd)+" at "+Math.round(spd)+" km/h";
+ var np=parseFloat($("np").value),ps=$("pstat");
+ if(np>=0&&$("np").value!==""){
+  if(range<np){ps.className="status s-bad";ps.textContent="Warning: you will run dry before the next pump. Slow down or refuel at the nearest stop."}
+  else if(range<np*1.25+10){ps.className="status s-warn";ps.textContent="Tight. You can reach the next pump with little margin. Treat it as your last stop."}
+  else{ps.className="status s-ok";ps.textContent="You can reach the next pump with "+Math.round(range-np)+" km to spare."}
+ }else if(range<30){ps.className="status s-bad";ps.textContent="Low fuel: under 30 km left. Refuel at the first pump you see."}
+ else{ps.className="status s-ok";ps.textContent="Enter the distance to the next pump to get an alert."}
+ save();
+}
+
+// tabs
+document.querySelectorAll("nav button").forEach(function(b){b.onclick=function(){
+ document.querySelectorAll("nav button").forEach(function(x){x.setAttribute("aria-selected",x===b)});
+ ["setup","trip","tank","mapt","log"].forEach(function(t){$(t).classList.toggle("hide",t!==b.dataset.t)});
+}});
+
+// GPS
+var wid=null;
+$("gps").onclick=function(){
+ if(wid!==null){navigator.geolocation.clearWatch(wid);wid=null;$("gps").textContent="Use live GPS speed";$("gpsmsg").textContent="";return}
+ if(!navigator.geolocation){$("gpsmsg").textContent="GPS is not available on this device.";return}
+ $("gpsmsg").textContent="Waiting for GPS...";
+ try{wid=navigator.geolocation.watchPosition(function(p){
+  if(p.coords.speed!==null&&p.coords.speed>=0){S.spd=Math.round(p.coords.speed*3.6);$("spd").value=S.spd;$("gpsmsg").textContent="Live speed on. Tap again to stop.";upd()}
+  else $("gpsmsg").textContent="GPS on, but no speed yet. Start moving."
+ },function(){$("gpsmsg").textContent="Location was blocked. Type your speed instead.";wid=null;$("gps").textContent="Use live GPS speed"},{enableHighAccuracy:true});
+ $("gps").textContent="Stop GPS speed"}catch(e){$("gpsmsg").textContent="Location is not available here."}
+};
+
+// log
+function logs(){
+ var L=S.logs,rows=[],sum=0,n=0;
+ for(var i=1;i<L.length;i++){var km=L[i].odo-L[i-1].odo;if(km>0&&L[i].l>0){var m=km/L[i].l;rows.push(m);sum+=m;n++}else rows.push(null)}
+ rows.unshift(null);
+ var h="<tr><th>Date</th><th>Litres</th><th>Odo</th><th>km/l</th></tr>";
+ for(var j=L.length-1;j>=0;j--)h+="<tr><td>"+L[j].d+"</td><td>"+L[j].l+"</td><td>"+L[j].odo+"</td><td>"+(rows[j]?f1(rows[j]):"–")+"</td></tr>";
+ $("tbl").innerHTML=L.length?h:"";
+ if(n){var a=sum/n;$("avg").textContent=f1(a)+" km/l";$("avgsub").textContent="Average over "+n+" tank"+(n>1?"s":"")+". Estimate was "+f1(V[S.v][1]*0.8*Math.max(0.6,1-0.015*(S.age||0)))+" km/l.";$("useavg").classList.remove("hide");$("useavg").dataset.v=a}
+ else{$("avg").textContent="–";$("avgsub").textContent="Needs at least two refuels.";$("useavg").classList.add("hide")}
+}
+$("addlog").onclick=function(){
+ var l=parseFloat($("lt").value),o=parseFloat($("odo").value),prev=S.logs.length?S.logs[S.logs.length-1].odo:-1;
+ if(!(l>0)||!(o>=0)){$("logmsg").textContent="Enter both litres and odometer.";return}
+ if(o<=prev){$("logmsg").textContent="Odometer must be higher than your last entry ("+prev+" km).";return}
+ S.logs.push({d:new Date().toISOString().slice(0,10),l:l,odo:o});
+ $("lt").value="";$("odo").value="";$("logmsg").textContent="Saved.";logs();save();
+};
+$("undo").onclick=function(){S.logs.pop();logs();save()};
+$("useavg").onclick=function(){S.mil=Math.round(this.dataset.v*10)/10;$("mil").value=S.mil;upd();$("logmsg").textContent="Mileage updated on the Vehicle tab."};
+$("exp").onclick=function(){$("out").value=JSON.stringify(S,null,1);$("out").classList.remove("hide");$("out").select()};
+$("reset").onclick=function(){if(confirm("Clear all saved data?")){try{localStorage.removeItem("fuelapp1")}catch(e){}location.reload()}};
+
+
+// ---- map, route, pumps ----
+var map,rm,rl,route=null,cum=[],ri=0,cur=null,gw=null,pumps=[],lastLv="",lastSay=0,pm=[];
+function ini(){if(map||typeof L==="undefined")return;map=L.map("m").setView([30.9,75.85],11);L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(map)}
+document.querySelector('[data-t="mapt"]').addEventListener("click",function(){ini();if(map)setTimeout(function(){map.invalidateSize()},60)});
+function hv(a,b){var r=Math.PI/180,x=Math.sin((b[0]-a[0])*r/2),y=Math.sin((b[1]-a[1])*r/2);return 12742000*Math.asin(Math.sqrt(x*x+Math.cos(a[0]*r)*Math.cos(b[0]*r)*y*y))}
+function mm(t){$("mmsg").textContent=t}
+function onpos(p){
+ var n=[p.coords.latitude,p.coords.longitude];
+ if(cur){var d=hv(cur,n);if(d>8&&d<500){S.lvl=Math.max(0,S.lvl-d/1000/(eff()*sf(Math.max(5,S.spd||40)))/S.cap*100);$("lvl").value=Math.round(S.lvl)}}
+ cur=n;
+ if(p.coords.speed!==null&&p.coords.speed>=0){S.spd=Math.round(p.coords.speed*3.6);$("spd").value=S.spd}
+ if(map){if(!rm){rm=L.circleMarker(n,{radius:8,color:"#fff",weight:3,fillColor:"#0e5a7c",fillOpacity:1}).addTo(map);map.setView(n,14)}else rm.setLatLng(n)}
+ upd();live();
+}
+$("mgps").onclick=function(){
+ ini();
+ if(gw!==null){navigator.geolocation.clearWatch(gw);gw=null;$("mgps").textContent="Start live GPS";mm("GPS stopped.");return}
+ if(!navigator.geolocation){mm("GPS is not available on this device.");return}
+ mm("Waiting for GPS...");
+ gw=navigator.geolocation.watchPosition(onpos,function(){mm("Location blocked. Allow location and use an https link.");gw=null},{enableHighAccuracy:true,maximumAge:2000});
+ $("mgps").textContent="Stop GPS";
+ try{navigator.wakeLock.request("screen")}catch(e){}
+};
+$("mgo").onclick=async function(){
+ ini();var q=$("dest").value.trim();if(!q){mm("Type a destination first.");return}
+ if(!cur){mm("Start live GPS first so I know where you are.");return}
+ try{
+  mm("Searching place...");
+  var g=await (await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=in&q="+encodeURIComponent(q))).json();
+  if(!g.length){mm("Place not found. Try a more specific name.");return}
+  var t=[+g[0].lat,+g[0].lon];
+  mm("Finding route...");
+  var r=await (await fetch("https://router.project-osrm.org/route/v1/driving/"+cur[1]+","+cur[0]+";"+t[1]+","+t[0]+"?overview=full&geometries=geojson")).json();
+  if(!r.routes||!r.routes.length){mm("No route found.");return}
+  route=r.routes[0].geometry.coordinates.map(function(c){return [c[1],c[0]]});
+  cum=[0];for(var i=1;i<route.length;i++)cum.push(cum[i-1]+hv(route[i-1],route[i]));
+  ri=0;if(rl)map.removeLayer(rl);rl=L.polyline(route,{weight:5,color:"#0e5a7c"}).addTo(map);map.fitBounds(rl.getBounds());
+  $("dist").value=f1(cum[cum.length-1]/1000);upd();
+  mm("Route is "+f1(cum[cum.length-1]/1000)+" km. Finding pumps...");
+  var s=90,w=190,n=-90,e=-190;route.forEach(function(p){s=Math.min(s,p[0]);n=Math.max(n,p[0]);w=Math.min(w,p[1]);e=Math.max(e,p[1])});
+  if(n-s>3||e-w>3){mm("Route is very long, pump search may be slow or fail. Try a shorter trip first.")}
+  var bb=(s-0.03)+","+(w-0.03)+","+(n+0.03)+","+(e+0.03);
+  var j=await (await fetch("https://overpass-api.de/api/interpreter",{method:"POST",body:"data="+encodeURIComponent('[out:json][timeout:25];node["amenity"="fuel"]('+bb+');out;')})).json();
+  pm.forEach(function(x){map.removeLayer(x)});pm=[];pumps=[];
+  j.elements.forEach(function(el){var pt=[el.lat,el.lon],best=1e9,bi=0;
+   for(var i=0;i<route.length;i++){var d=hv(pt,route[i]);if(d<best){best=d;bi=i}}
+   if(best<1500){var nm=(el.tags&&(el.tags.name||el.tags.brand))||"Petrol pump";pumps.push({p:pt,a:cum[bi],n:nm});
+    pm.push(L.circleMarker(pt,{radius:6,color:"#c8372d",fillColor:"#c8372d",fillOpacity:.9}).bindPopup(nm).addTo(map))}});
+  pumps.sort(function(a,b){return a.a-b.a});
+  mm(pumps.length+" pumps found along your route.");live();
+ }catch(err){mm("Network problem. Check internet and try again.")}
+};
+function live(){
+ if(!route||!cur)return;
+ var best=1e9;for(var i=ri;i<Math.min(route.length,ri+300);i++){var d=hv(cur,route[i]);if(d<best){best=d;ri=i}}
+ var done=cum[ri],left=(cum[cum.length-1]-done)/1000;
+ var range=S.cap*S.lvl/100*eff()*sf(Math.max(5,S.spd||40)),safe=range*0.9;
+ var ahead=pumps.filter(function(x){return x.a-done>50}),reach=ahead.filter(function(x){return (x.a-done)/1000<=safe});
+ var lv,tx;
+ if(left<=safe){lv="s-ok";tx="You can reach your destination. "+f1(left)+" km left, range "+Math.round(range)+" km."}
+ else if(reach.length){var ls=reach[reach.length-1],dl=(ls.a-done)/1000;
+  lv=dl<=10?"s-bad":"s-warn";tx="Last pump you can reach: "+ls.n+", "+f1(dl)+" km ahead. Refuel there."}
+ else{lv="s-bad";tx="No pump within your range of "+Math.round(range)+" km. Slow down and refuel at the first stop you see."}
+ var el=$("mstat");el.className="status "+lv;el.textContent=tx;
+ if(lv!=="s-ok"&&(lv!==lastLv||(lv==="s-bad"&&Date.now()-lastSay>60000))){lastSay=Date.now();
+  try{speechSynthesis.speak(new SpeechSynthesisUtterance(tx))}catch(e){}try{navigator.vibrate([300,150,300])}catch(e){}}
+ lastLv=lv;
+}
+
+fill();logs();upd();
+</script>
+</body>
+</html>
